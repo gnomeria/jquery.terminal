@@ -4,7 +4,7 @@
  *  __ / // // // // // _  // _// // / / // _  // _//     // //  \/ // _ \/ /
  * /  / // // // // // ___// / / // / / // ___// / / / / // // /\  // // / /__
  * \___//____ \\___//____//_/ _\_  / /_//____//_/ /_/ /_//_//_/ /_/ \__\_\___/
- *           \/              /____/                              version 0.11.11
+ *           \/              /____/                              version 0.11.17
  *
  * This file is part of jQuery Terminal. http://terminal.jcubic.pl
  *
@@ -31,7 +31,7 @@
  * Copyright (c) 2007-2013 Alexandru Marasteanu <hello at alexei dot ro>
  * licensed under 3 clause BSD license
  *
- * Date: Fri, 07 Oct 2016 19:34:39 +0000
+ * Date: Mon, 14 Nov 2016 20:10:54 +0000
  */
 
 /* TODO:
@@ -775,82 +775,22 @@
         });
     }
     // -------------------------------------------------------------------------
-    // :: Serialize object myself (biwascheme or prototype library do something
-    // :: wicked with JSON serialization for Arrays)
-    // -------------------------------------------------------------------------
-    $.json_stringify = function(object, level) {
-        var result = '', i;
-        level = level === undefined ? 1 : level;
-        var type = typeof object;
-        switch (type) {
-            case 'function':
-                result += object;
-                break;
-            case 'boolean':
-                result += object ? 'true' : 'false';
-                break;
-            case 'object':
-                if (object === null) {
-                    result += 'null';
-                } else if (object instanceof Array) {
-                    result += '[';
-                    var len = object.length;
-                    for (i = 0; i < len - 1; ++i) {
-                        result += $.json_stringify(object[i], level + 1);
-                    }
-                    result += $.json_stringify(object[len - 1], level + 1) + ']';
-                } else {
-                    result += '{';
-                    for (var property in object) {
-                        if (object.hasOwnProperty(property)) {
-                            result += '"' + property + '":' +
-                                $.json_stringify(object[property], level + 1);
-                        }
-                    }
-                    result += '}';
-                }
-                break;
-            case 'string':
-                var str = object;
-                var repl = {
-                    '\\\\': '\\\\',
-                    '"': '\\"',
-                    '/': '\\/',
-                    '\\n': '\\n',
-                    '\\r': '\\r',
-                    '\\t': '\\t'};
-                for (i in repl) {
-                    if (repl.hasOwnProperty(i)) {
-                        str = str.replace(new RegExp(i, 'g'), repl[i]);
-                    }
-                }
-                result += '"' + str + '"';
-                break;
-            case 'number':
-                result += String(object);
-                break;
-        }
-        result += (level > 1 ? ',' : '');
-        // quick hacks below
-        if (level === 1) {
-            // fix last comma
-            result = result.replace(/,([\]}])/g, '$1');
-        }
-        // fix comma before array or object
-        return result.replace(/([\[{]),/g, '$1');
-    };
-    // -------------------------------------------------------------------------
     // :: HISTORY CLASS
     // -------------------------------------------------------------------------
-    function History(name, size) {
+    function History(name, size, memory) {
         var enabled = true;
         var storage_key = '';
         if (typeof name === 'string' && name !== '') {
             storage_key = name + '_';
         }
         storage_key += 'commands';
-        var data = $.Storage.get(storage_key);
-        data = data ? $.parseJSON(data) : [];
+        var data;
+        if (memory) {
+            data = [];
+        } else {
+            data = $.Storage.get(storage_key);
+            data = data ? $.parseJSON(data) : [];
+        }
         var pos = data.length-1;
         $.extend(this, {
             append: function(item) {
@@ -861,7 +801,9 @@
                             data = data.slice(-size);
                         }
                         pos = data.length-1;
-                        $.Storage.set(storage_key, $.json_stringify(data));
+                        if (!memory) {
+                            $.Storage.set(storage_key, JSON.stringify(data));
+                        }
                     }
                 }
             },
@@ -911,7 +853,9 @@
                 enabled = true;
             },
             purge: function() {
-                $.Storage.remove(storage_key);
+                if (!memory) {
+                    $.Storage.remove(storage_key);
+                }
             },
             disable: function() {
                 enabled = false;
@@ -1626,7 +1570,7 @@
                 if (string !== undefined) {
                     name = string;
                     var enabled = history && history.enabled() || !history;
-                    history = new History(string, historySize);
+                    history = new History(string, historySize, options.history == 'memory');
                     // disable new history if old was disabled
                     if (!enabled) {
                         history.disable();
@@ -1975,7 +1919,7 @@
     var format_last_re = /\[\[[!gbiuso]*;[^;]*;[^\]]*\]?$/i;
     var format_exec_re = /(\[\[(?:[^\]]|\\\])*\]\])/;
     $.terminal = {
-        version: '0.11.11',
+        version: '0.11.17',
         // colors from http://www.w3.org/wiki/CSS/Properties/color/keywords
         color_names: [
             'black', 'silver', 'gray', 'white', 'maroon', 'red', 'purple',
@@ -2431,7 +2375,7 @@
     var ids = {}; // list of url based id of JSON-RPC
     $.jrpc = function(url, method, params, success, error) {
         ids[url] = ids[url] || 0;
-        var request = $.json_stringify({
+        var request = JSON.stringify({
            'jsonrpc': '2.0', 'method': method,
             'params': params, 'id': ++ids[url]});
         return $.ajax({
@@ -2439,8 +2383,8 @@
             data: request,
             success: function(result, status, jqXHR) {
                 var content_type = jqXHR.getResponseHeader('Content-Type');
-                if (!content_type.match(/application\/json/)) {
-                    var msg = 'Response Content-Type is not application/json';
+                if (!content_type.match(/(application|text)\/json/)) {
+                    var msg = 'Response Content-Type is neither application/json nor text/json';
                     if (console && console.warn) {
                         console.warn(msg);
                     } else {
@@ -2598,9 +2542,11 @@
         enabled: true,
         historySize: 60,
         maskChar: '*',
+        wrap: true,
         checkArity: true,
         raw: false,
         exceptionHandler: null,
+        memory: false,
         cancelableAjax: true,
         processArguments: true,
         linksNoReferrer: false,
@@ -2666,6 +2612,32 @@
     var first_instance = true; // used by history state
     var last_id;
     $.fn.terminal = function(init_interpreter, options) {
+        function StorageHelper(memory) {
+            if (memory) {
+                this.storage = {};
+            }
+            this.set = function(key, value) {
+                if (memory) {
+                    this.storage[key] = value;
+                } else {
+                    $.Storage.set(key, value);
+                }
+            };
+            this.get = function(key) {
+                if (memory) {
+                    return this.storage[key];
+                } else {
+                    $.Storage.get(key);
+                }
+            };
+            this.remove = function(key) {
+                if (memory) {
+                    delete this.storage[key];
+                } else {
+                    $.Storage.remove(key);
+                }
+            };
+        }
         // ---------------------------------------------------------------------
         // :: helper function
         // ---------------------------------------------------------------------
@@ -2686,10 +2658,10 @@
                 self.echo(object);
             } else if (object instanceof Array) {
                 self.echo($.map(object, function(object) {
-                    return $.json_stringify(object);
+                    return JSON.stringify(object);
                 }).join(' '));
             } else if (typeof object === 'object') {
-                self.echo($.json_stringify(object));
+                self.echo(JSON.stringify(object));
             } else {
                 self.echo(object);
             }
@@ -3170,7 +3142,9 @@
             }
             output_buffer.push(NEW_LINE);
             if (!options.raw && (string.length > num_chars ||
-                                       string.match(/\n/))) {
+                                       string.match(/\n/)) &&
+                ((settings.wrap === true && options.wrap === undefined) ||
+                  settings.wrap === false && options.wrap === true)) {
                 var words = options.keepWords;
                 var array = $.terminal.split_equal(string, num_chars, words);
                 for (i = 0, len = array.length; i < len; ++i) {
@@ -3186,14 +3160,16 @@
                         }
                     }
                 }
-            } else {
-                if (!options.raw) {
-                    string = $.terminal.format(string, {
-                        linksNoReferrer: settings.linksNoReferrer
-                    });
-                }
-                output_buffer.push(string);
-            }
+            } else if (!options.raw) {
+				string = $.terminal.format(string, {
+					linksNoReferrer: settings.linksNoReferrer
+				});
+				string.split(/\n/).forEach(function(string) {
+					output_buffer.push(string);
+				});
+			} else {
+				output_buffer.push(string);
+			}
             output_buffer.push(options.finalize);
         }
         // ---------------------------------------------------------------------
@@ -3351,7 +3327,7 @@
         function maybe_update_hash() {
             if (change_hash) {
                 fire_hash_change = false;
-                location.hash = '#' + $.json_stringify(hash_commands);
+                location.hash = '#' + JSON.stringify(hash_commands);
                 setTimeout(function() {
                     fire_hash_change = true;
                 }, 100);
@@ -3506,15 +3482,15 @@
         // ---------------------------------------------------------------------
         function clear_loging_storage() {
             var name = self.prefix_name(true) + '_';
-            $.Storage.remove(name + 'token');
-            $.Storage.remove(name + 'login');
+            storage.remove(name + 'token');
+            storage.remove(name + 'login');
         }
         // ---------------------------------------------------------------------
         // :: Save the interpreter name for use with purge
         // ---------------------------------------------------------------------
         function maybe_append_name(interpreter_name) {
             var storage_key = self.prefix_name() + '_interpreters';
-            var names = $.Storage.get(storage_key);
+            var names = storage.get(storage_key);
             if (names) {
                 names = $.parseJSON(names);
             } else {
@@ -3522,7 +3498,7 @@
             }
             if ($.inArray(interpreter_name, names) == -1) {
                 names.push(interpreter_name);
-                $.Storage.set(storage_key, $.json_stringify(names));
+                storage.set(storage_key, JSON.stringify(names));
             }
         }
         // ---------------------------------------------------------------------
@@ -3829,8 +3805,9 @@
                                 $.terminal.defaults,
                                 {name: self.selector},
                                 options || {});
+        var storage = new StorageHelper(settings.memory);
         var strings = $.terminal.defaults.strings;
-        var enabled = settings.enabled, frozen;
+        var enabled = settings.enabled, frozen = false;
         var paused = false;
         var autologin = true; // set to false of onBeforeLogin return false
         // -----------------------------------------------------------------
@@ -4018,8 +3995,8 @@
                             command_line.history().enable();
                         }
                         var name = self.prefix_name(true) + '_';
-                        $.Storage.set(name + 'token', token);
-                        $.Storage.set(name + 'login', user);
+                        storage.set(name + 'token', token);
+                        storage.set(name + 'login', user);
                         in_login = false;
                         if ($.isFunction(success)) {
                             // will be used internaly since users know
@@ -4741,7 +4718,7 @@
             // :: there is no login
             // -------------------------------------------------------------
             token: function(local) {
-                return $.Storage.get(self.prefix_name(local) + '_token');
+                return storage.get(self.prefix_name(local) + '_token');
             },
             // -------------------------------------------------------------
             // :: Function sets the token to the supplied value. This function
@@ -4750,9 +4727,9 @@
             set_token: function(token, local) {
                 var name = self.prefix_name(local) + '_token';
                 if (typeof token == 'undefined') {
-                    $.Storage.remove(name, token);
+                    storage.remove(name, token);
                 } else {
-                    $.Storage.set(name, token);
+                    storage.set(name, token);
                 }
                 return self;
             },
@@ -4761,13 +4738,13 @@
             // :: by the set_token method.
             // -------------------------------------------------------------
             get_token: function(local) {
-                return $.Storage.get(self.prefix_name(local) + '_token');
+                return storage.get(self.prefix_name(local) + '_token');
             },
             // -------------------------------------------------------------
             // :: Function return Login name entered by the user
             // -------------------------------------------------------------
             login_name: function(local) {
-                return $.Storage.get(self.prefix_name(local) + '_login');
+                return storage.get(self.prefix_name(local) + '_login');
             },
             // -------------------------------------------------------------
             // :: Function returns the name of current interpreter
@@ -4953,14 +4930,14 @@
             purge: function() {
                 init_deferr.then(function() {
                     var prefix = self.prefix_name() + '_';
-                    var names = $.Storage.get(prefix + 'interpreters');
+                    var names = storage.get(prefix + 'interpreters');
                     $.each($.parseJSON(names), function(_, name) {
-                        $.Storage.remove(name + '_commands');
-                        $.Storage.remove(name + '_token');
-                        $.Storage.remove(name + '_login');
+                        storage.remove(name + '_commands');
+                        storage.remove(name + '_token');
+                        storage.remove(name + '_login');
                     });
                     command_line.purge();
-                    $.Storage.remove(prefix + 'interpreters');
+                    storage.remove(prefix + 'interpreters');
                 });
                 return self;
             },
@@ -5123,7 +5100,7 @@
             // CREATE COMMAND LINE
             command_line = $('<div/>').appendTo(self).cmd({
                 prompt: settings.prompt,
-                history: settings.history,
+                history: settings.memory ? 'memory' : settings.history,
                 historyFilter: settings.historyFilter,
                 historySize: settings.historySize,
                 width: '100%',
@@ -5181,29 +5158,6 @@
                     }
                 });*/
             }
-            // detect mouse drag
-            (function() {
-                var count = 0;
-                var isDragging = false;
-                self.mousedown(function() {
-                    $(window).mousemove(function() {
-                        isDragging = true;
-                        count = 0;
-                        $(window).unbind('mousemove');
-                    });
-                }).mouseup(function() {
-                    var wasDragging = isDragging;
-                    isDragging = false;
-                    $(window).unbind('mousemove');
-                    if (!wasDragging && ++count == 1) {
-                        count = 0;
-                        if (!self.enabled() && !frozen) {
-                            self.focus();
-                            command_line.enable();
-                        }
-                    }
-                });
-            })();
             if (is_touch) {
                 self.click(function() {
                     if (!self.enabled() && !frozen) {
@@ -5213,6 +5167,32 @@
                         self.focus(false);
                     }
                 });
+            } else {
+                // detect mouse drag
+                (function() {
+                    var count = 0;
+                    var isDragging = false;
+                    self.mousedown(function() {
+                        self.oneTime(1, function() {
+                            $(window).mousemove(function() {
+                                isDragging = true;
+                                count = 0;
+                                $(window).unbind('mousemove');
+                            });
+                        });
+                    }).mouseup(function() {
+                        var wasDragging = isDragging;
+                        isDragging = false;
+                        $(window).unbind('mousemove');
+                        if (!wasDragging && ++count == 1) {
+                            count = 0;
+                            if (!self.enabled() && !frozen) {
+                                self.focus();
+                                command_line.enable();
+                            }
+                        }
+                    });
+                })();
             }
             self.delegate('.exception a', 'click', function(e) {
                 //.on('click', '.exception a', function(e) {
